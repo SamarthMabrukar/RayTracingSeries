@@ -4,23 +4,36 @@
 #include "color.h"
 #include "ray.h"
 
-bool hit_sphere(const point3 &vCenter, double dRadius, const ray &vRay)
+double hit_sphere(const point3 &vCenter, double dRadius, const ray &vRay)
 {
     vec3 oc = vCenter - vRay.origin();
-    auto a = dot(vRay.direction(), vRay.direction());
-    auto b = -2.0 * dot(vRay.direction(), oc);
-    auto c = dot(oc, oc) - dRadius * dRadius;
-    auto discriminant = b * b - 4 * a * c;
+    // auto a = dot(vRay.direction(), vRay.direction());
+    auto a = vRay.direction().squared_length();
+    // auto b = -2.0 * dot(vRay.direction(), oc);
+    auto h = dot(vRay.direction(), oc);
+    auto c = oc.squared_length() - dRadius * dRadius;
+    auto discriminant = h * h - a * c;
+    // auto discriminant = b * b - 4 * a * c;
 
-    return (discriminant >= 0);
+    if (discriminant < 0)
+    {
+        return -1.0;
+    }
+    else
+    {
+        // return ((-b) - std::sqrt(discriminant)) / (2.0 * a);
+        return ((h)-std::sqrt(discriminant)) / (a);
+    }
 }
 
 color ray_color(const ray &r)
 {
     // Ray hit color
-    if (hit_sphere(point3(0, 0, -1), 0.5, r))
+    double t = hit_sphere(point3(0, 0, -1), 0.5, r);
+    if (t > 0.0)
     {
-        return color(1, 0, 0);
+        vec3 N = unit_vector(r.at(t) - vec3(0, 0, -1));
+        return 0.5 * color(N.x() + 1, N.y() + 1, N.z() + 1);
     }
 
     // Background color
