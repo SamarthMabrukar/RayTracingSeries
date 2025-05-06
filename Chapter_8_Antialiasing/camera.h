@@ -2,6 +2,7 @@
 #define CAMERA_H
 
 #include "hittable.h"
+#include "ray.h"
 
 class camera
 {
@@ -33,12 +34,19 @@ public:
             std::clog << "\rScanlines remaining: " << (iImageHeight - j) << ' ' << std::flush;
             for (int i = 0; i < iImageWidth; i++)
             {
-                auto pixel_center = vPixel00_loc + (i * vPixelDelta_u) + (j * vPixelDelta_v);
+                /*auto pixel_center = vPixel00_loc + (i * vPixelDelta_u) + (j * vPixelDelta_v);
                 auto ray_direction = pixel_center - vCameraCenter;
                 ray r(vCameraCenter, ray_direction);
 
                 color pixel_color = ray_color(r, world);
-                write_color(std::cout, pixel_color);
+                write_color(std::cout, pixel_color);*/
+                color pixel_color(0, 0, 0);
+                for (int iSample = 0; iSample < iSamplesPerPixel; iSample++)
+                {
+                    ray r = get_ray(i, j);
+                    pixel_color += ray_color(r, world);
+                }
+                write_color(std::cout, dPixelSampleScale * pixel_color);
             }
         }
 
@@ -105,19 +113,20 @@ private:
         auto offset = sample_square();
         auto pixel_sample = vPixel00_loc + ((i + offset.x()) * vPixelDelta_u) + ((j + offset.y()) * vPixelDelta_v);
 
-        auto ray_origin = (defocus_angle <= 0) ? vCameraCenter : defocus_disk_sample();
+        // auto ray_origin = (defocus_angle <= 0) ? vCameraCenter : defocus_disk_sample();
+        auto ray_origin = vCameraCenter;
         auto ray_direction = pixel_sample - ray_origin;
 
         return ray(ray_origin, ray_direction);
     }
 
-    /*vec3 sample_square() const
+    vec3 sample_square() const
     {
         // Returns the vector to a random point in the [-.5,-.5]-[+.5,+.5] unit square.
         return vec3(random_double() - 0.5, random_double() - 0.5, 0);
     }
 
-    vec3 sample_disk(double radius) const
+    /*vec3 sample_disk(double radius) const
     {
         // Returns a random point in the unit (radius 0.5) disk centered at the origin.
         return radius * random_in_unit_disk();
