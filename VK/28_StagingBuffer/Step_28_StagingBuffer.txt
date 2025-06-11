@@ -1,0 +1,16 @@
+After Step 27: Final Render
+Replacing step 22.
+
+Step_22a : Staging vertex Buffer
+
+Algotithm/Steps:
+
+1. Create a local vertex buffer just like previously created vertex buffer BUT with different usage and differentsharing mode. Identify it as staging buffer! This buffer will be visible to host and can be mapped to device memory.
+2. Then create the usual vertex buffer visible only to device.
+3. Create one special command buffer.
+4. Build above command buffer by Vulkan's buffer copy command. And copy the data in the staging buffer from step 1 to the destination buffer from step 2. While doing this use our command queue and the command buffer to submit the work of buffer copy.
+5. After done free/destroy the command buffer. 
+6. Destroy the local Vertex Buffer(Staging Buffer) as it's job is done!
+
+VK_MEMORY_PROPERTY_HOST_COHERENT_BIT: This flag means, no need to manage Vulkan Cache Mechanism of flushing and mapping. As We order Vulkan to maintain the coherency. This bit is important for faster data transfer.
+
