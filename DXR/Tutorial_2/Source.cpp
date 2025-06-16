@@ -7,6 +7,15 @@
 #include <iostream>
 #include <vector>
 
+#define _USE_MATH_DEFINES
+#include <math.h>
+
+#define GLM_FORCE_CTOR_INIT
+#include <GLM/glm/glm.hpp>
+#define GLM_ENABLE_EXPERIMENTAL
+#include <GLM/glm/gtx/transform.hpp>
+#include <GLM/glm/gtx/euler_angles.hpp>
+
 #pragma warning(disable : 4838)
 #pragma warning(disable : 4996)
 
@@ -70,8 +79,23 @@ BOOL g_bEnableDebugging = FALSE;
 
 /* Acceleration Structure */
 ID3D12Resource *g_pID3D12Resource_VertexBuffer = NULL;
-ID3D12Resource *g_pID3D12Resource_TopLevelAS = NULL;
-ID3D12Resource *g_pID3D12Resource_BottomLevelAS = NULL;
+
+typedef struct smBottomAcceleratrionStructureBuffers
+{
+      ID3D12Resource* pID3D12Resource_Scratch = NULL;                         // Scratch Buffer of Acceleration Structure
+      ID3D12Resource* pID3D12Resource_Result = NULL;                          // Acceleration Structure Pointer
+} BottomAcceleratrionStructureBuffers;
+
+typedef struct smTopLevelAcceleratrionStructureBuffers//: public smBottomAcceleratrionStructureBuffers
+{
+      ID3D12Resource* pID3D12Resource_Scratch = NULL;                         // Scratch Buffer of Acceleration Structure
+      ID3D12Resource* pID3D12Resource_Result = NULL;                          // Acceleration Structure Pointer
+      ID3D12Resource* pID3D12Resource_InstanceDesc = NULL;              // Only For Top Level Acceleration Structure, Instancing.
+} TopLevelAcceleratrionStructureBuffers;
+
+
+BottomAcceleratrionStructureBuffers g_BottomLevelAccelerationStructure{};
+TopLevelAcceleratrionStructureBuffers g_TopLevelAccelerationStructure{};
 uint64_t g_iTLASSize = 0;
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR szCmdLine, int iCmdShow)
@@ -275,6 +299,7 @@ HRESULT Initialize(void)
       HRESULT CreateSwapchain(void);
       HRESULT CreateDescriotorHeap(void);
       //HRESULT Resize(int iWidth, int iHeight);
+      HRESULT CreateAccelerationStructure(void);
 
       HRESULT hr = S_OK;
 
@@ -430,6 +455,23 @@ HRESULT Initialize(void)
             fclose(g_pFile);
       }
 
+      hr = CreateAccelerationStructure();
+      if (FAILED(hr))
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "Initialize : CreateAccelerationStructure() FAILED.\n");
+            fclose(g_pFile);
+            return hr;
+      }
+      else
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "Initialize : CreateAccelerationStructure() SUCCEEDED.\n");
+            fclose(g_pFile);
+      }
+
+
+
       return hr;
 }
 
@@ -484,6 +526,12 @@ void Render(void)
             WaitForSingleObject(g_hFenceEvent,INFINITE);
       }
 
+      if (pGraphicsList)
+      {
+            pGraphicsList->Release();
+            pGraphicsList = NULL;
+      }
+
       g_FrameObjects[iCurrentFrameIndex].pID3D12CommandAllocator->Reset();
       g_pID3D12GraphicsCommandList4->Reset(g_FrameObjects[iCurrentFrameIndex].pID3D12CommandAllocator,NULL);
 
@@ -524,6 +572,48 @@ void UnInitialize(void)
             fclose(g_pFile);
       }
 
+      // top level Acceleration Structure
+      if (g_TopLevelAccelerationStructure.pID3D12Resource_InstanceDesc)
+      {
+            g_TopLevelAccelerationStructure.pID3D12Resource_InstanceDesc->Release();
+            g_TopLevelAccelerationStructure.pID3D12Resource_InstanceDesc = NULL;
+      }
+
+      if (g_TopLevelAccelerationStructure.pID3D12Resource_Result)
+      {
+            g_TopLevelAccelerationStructure.pID3D12Resource_Result->Release();
+            g_TopLevelAccelerationStructure.pID3D12Resource_Result = NULL;
+      }
+
+      if (g_TopLevelAccelerationStructure.pID3D12Resource_Scratch)
+      {
+            g_TopLevelAccelerationStructure.pID3D12Resource_Scratch->Release();
+            g_TopLevelAccelerationStructure.pID3D12Resource_Scratch = NULL;
+      }
+
+      // Bottom Level Acceleration Structure
+      if (g_BottomLevelAccelerationStructure.pID3D12Resource_Result)
+      {
+            g_BottomLevelAccelerationStructure.pID3D12Resource_Result->Release();
+            g_BottomLevelAccelerationStructure.pID3D12Resource_Result = NULL;
+      }
+
+      if (g_BottomLevelAccelerationStructure.pID3D12Resource_Scratch)
+      {
+            g_BottomLevelAccelerationStructure.pID3D12Resource_Scratch->Release();
+            g_BottomLevelAccelerationStructure.pID3D12Resource_Scratch = NULL;
+      }
+
+      if (g_pID3D12Resource_VertexBuffer)
+      {
+            g_pID3D12Resource_VertexBuffer->Release();
+            g_pID3D12Resource_VertexBuffer = NULL;
+
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "UnInitialize : ID3D12Resource->Release(). Vertex Buffer Released\n");
+            fclose(g_pFile);
+      }
+
       if (g_heapData.pID3D12DescriptorHeap)
       {
             g_heapData.pID3D12DescriptorHeap->Release();
@@ -534,18 +624,18 @@ void UnInitialize(void)
             fclose(g_pFile);
       }
 
-      for (size_t idx = 0; idx < SWAPCHAIN_BUFFER_COUNT; idx++)
+      for (int idx = 0; idx < SWAPCHAIN_BUFFER_COUNT; idx++)
       {
             g_FrameObjects[idx].pID3D12CommandAllocator->Release();
             g_FrameObjects[idx].pID3D12CommandAllocator = NULL;
             fopen_s(&g_pFile, g_szLogFileName, "a+");
-            fprintf_s(g_pFile, "UnInitialize : ID3D12CommandAllocator->Release().\n");
+            fprintf_s(g_pFile, "UnInitialize : ID3D12CommandAllocator->Release(), Iteration=%d.\n", idx);
             fclose(g_pFile);
 
             g_FrameObjects[idx].pID3D12Resource_SwapchainBuffers->Release();
             g_FrameObjects[idx].pID3D12Resource_SwapchainBuffers = NULL;
             fopen_s(&g_pFile, g_szLogFileName, "a+");
-            fprintf_s(g_pFile, "UnInitialize : ID3D12Resource_SwapchainBuffers->Release().\n");
+            fprintf_s(g_pFile, "UnInitialize : ID3D12Resource_SwapchainBuffers->Release(), Iteration=%d.\n", idx);
             fclose(g_pFile);
       }
 
@@ -657,27 +747,25 @@ HRESULT CraeteDevice(void)
             fclose(g_pFile);
             return hr;
       }
-      else
+      
+      // Check Capabilities
+      D3D12_FEATURE_DATA_D3D12_OPTIONS5 rayTracingFeature{};
+      hr = g_pID3D12Device5->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &rayTracingFeature, sizeof(rayTracingFeature));
+      if (SUCCEEDED(hr))
       {
-            // Check Capabilities
-            D3D12_FEATURE_DATA_D3D12_OPTIONS5 rayTracingFeature{};
-            hr = g_pID3D12Device5->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &rayTracingFeature, sizeof(rayTracingFeature));
-            if (SUCCEEDED(hr))
+            if (rayTracingFeature.RaytracingTier != D3D12_RAYTRACING_TIER_NOT_SUPPORTED)
             {
-                  if (rayTracingFeature.RaytracingTier != D3D12_RAYTRACING_TIER_NOT_SUPPORTED)
-                  {
-                        fopen_s(&g_pFile, g_szLogFileName, "a+");
-                        fprintf_s(g_pFile, "CraeteDevice : D3D12CreateDevice() SUCCEEDED.\n");
-                        fprintf_s(g_pFile, "CraeteDevice : SAM: Congratulations you Have Ray Tracing Support!\n");
-                        fclose(g_pFile);
-                  }
-                  else
-                  {
-                        fopen_s(&g_pFile, g_szLogFileName, "a+");
-                        fprintf_s(g_pFile, "CraeteDevice : D3D12CreateDevice() SUCCEEDED. You DO NOT have Support for Ray Tracing\n");
-                        fclose(g_pFile);
-                        hr = S_FALSE;
-                  }
+                  fopen_s(&g_pFile, g_szLogFileName, "a+");
+                  fprintf_s(g_pFile, "CraeteDevice : D3D12CreateDevice() SUCCEEDED.\n");
+                  fprintf_s(g_pFile, "CraeteDevice : SAM: Congratulations you Have Ray Tracing Support!\n");
+                  fclose(g_pFile);
+            }
+            else
+            {
+                  fopen_s(&g_pFile, g_szLogFileName, "a+");
+                  fprintf_s(g_pFile, "CraeteDevice : D3D12CreateDevice() SUCCEEDED.\nSAM: NA HO PAYI BHAIYA!!\n");
+                  fclose(g_pFile);
+                  hr = S_FALSE;
             }
       }
 
@@ -780,6 +868,429 @@ HRESULT CreateDescriotorHeap(void)
             fprintf_s(g_pFile, "CreateDescriotorHeap : ID3D12Device5->CreateDescriptorHeap() SUCCEEDED.\n");
             fclose(g_pFile);
       }
+
+      return hr;
+}
+
+HRESULT CreateAccelerationStructure(void)
+{
+      HRESULT CreateVertexBuffer(void);
+      HRESULT CreateBottomLevelAccelerationStructure(void);
+      HRESULT CreateTopLevelAccelerationStructure(void);
+
+      HRESULT hr = S_OK;
+
+      hr = CreateVertexBuffer();
+      if (FAILED(hr))
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "CreateAccelerationStructure : CreateVertexBuffer() FAILED.\n");
+            fclose(g_pFile);
+            return hr;
+      }
+      else
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "CreateAccelerationStructure : CreateVertexBuffer() SUCCEEDED.\n");
+            fclose(g_pFile);
+      }
+
+      hr = CreateBottomLevelAccelerationStructure();
+      if (FAILED(hr))
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "CreateAccelerationStructure : CreateBottomLevelAccelerationStructure() FAILED.\n");
+            fclose(g_pFile);
+            return hr;
+      }
+      else
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "CreateAccelerationStructure : CreateBottomLevelAccelerationStructure() SUCCEEDED.\n");
+            fclose(g_pFile);
+      }
+
+      hr = CreateTopLevelAccelerationStructure();
+      if (FAILED(hr))
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "CreateAccelerationStructure : CreateTopLevelAccelerationStructure() FAILED.\n");
+            fclose(g_pFile);
+            return hr;
+      }
+      else
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "CreateAccelerationStructure : CreateTopLevelAccelerationStructure() SUCCEEDED.\n");
+            fclose(g_pFile);
+      }
+
+      g_pID3D12GraphicsCommandList4->Close();
+      ID3D12CommandList* pGraphicsList = NULL;
+      g_pID3D12GraphicsCommandList4->QueryInterface(__uuidof(pGraphicsList), (void**)&pGraphicsList);
+      g_pID3D12CommandQueue->ExecuteCommandLists(1, &pGraphicsList);
+      g_iFenceValue++;
+      g_pID3D12CommandQueue->Signal(g_pID3D12Fence, g_iFenceValue);
+
+      g_pID3D12Fence->SetEventOnCompletion(g_iFenceValue, g_hFenceEvent);
+      WaitForSingleObject(g_hFenceEvent, INFINITE);
+      uint32_t bufferIndex = g_pIDXGISwapChain->GetCurrentBackBufferIndex();
+      g_pID3D12GraphicsCommandList4->Reset(g_FrameObjects[0].pID3D12CommandAllocator, nullptr);
+
+      return hr;
+}
+
+HRESULT CreateVertexBuffer(void)
+{
+      HRESULT hr = S_OK;
+
+      const glm::vec3 triangle_position[] =
+      {
+            glm::vec3(        0,      1, 0.0f),// Apex
+            glm::vec3(   1.0f,  -1.0f, 0.0f),// Right-Bottom
+            glm::vec3(  -1.0f,  -1.0f, 0.0f),// Left-bottom
+      };
+
+      D3D12_RESOURCE_DESC bufferDescription{};
+      bufferDescription.Alignment = 0;
+      bufferDescription.DepthOrArraySize = 1;
+      bufferDescription.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+      bufferDescription.Flags = D3D12_RESOURCE_FLAG_NONE;
+      bufferDescription.Format = DXGI_FORMAT_UNKNOWN;
+      bufferDescription.Height = 1;
+      bufferDescription.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+      bufferDescription.MipLevels = 1;
+      bufferDescription.SampleDesc.Count = 1;
+      bufferDescription.SampleDesc.Quality = 0;
+      bufferDescription.Width = sizeof(triangle_position);
+      //bufferDescription.Width = sizeof(float) * 9;
+
+      D3D12_HEAP_PROPERTIES uploadHeapProperties{};
+      uploadHeapProperties.Type = D3D12_HEAP_TYPE_UPLOAD;
+      uploadHeapProperties.CPUPageProperty= D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+      uploadHeapProperties.MemoryPoolPreference= D3D12_MEMORY_POOL_UNKNOWN;
+      uploadHeapProperties.CreationNodeMask=0;
+      uploadHeapProperties.VisibleNodeMask=0;
+
+      hr = g_pID3D12Device5->CreateCommittedResource(&uploadHeapProperties, D3D12_HEAP_FLAG_NONE,&bufferDescription, D3D12_RESOURCE_STATE_GENERIC_READ, NULL,__uuidof(g_pID3D12Resource_VertexBuffer),(void**)&g_pID3D12Resource_VertexBuffer);
+      if (FAILED(hr))
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "CreateVertexBuffer : ID3D12Device5->CreateCommittedResource() FAILED.\n");
+            fclose(g_pFile);
+            return hr;
+      }
+      else
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "CreateVertexBuffer : ID3D12Device5->CreateCommittedResource() SUCCEEDED.\n");
+            fclose(g_pFile);
+      }
+
+      uint8_t* pData = NULL;
+      hr = g_pID3D12Resource_VertexBuffer->Map(0,NULL,(void**)&pData);
+      if (FAILED(hr))
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "CreateVertexBuffer : ID3D12Resource->Map() FAILED.\n");
+            fclose(g_pFile);
+            return hr;
+      }
+      else
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "CreateVertexBuffer : ID3D12Resource->Map() SUCCEEDED.\n");
+            fclose(g_pFile);
+      }
+      
+      if (pData)
+      {
+            memcpy(pData, triangle_position, sizeof(triangle_position));
+      }
+      
+      g_pID3D12Resource_VertexBuffer->Unmap(0, NULL);
+
+
+      return hr;
+}
+
+HRESULT CreateBottomLevelAccelerationStructure(void)
+      HRESULT hr = S_OK;
+
+      D3D12_RAYTRACING_GEOMETRY_DESC geometryDesc{};
+      geometryDesc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+      geometryDesc.Triangles.VertexBuffer.StartAddress = g_pID3D12Resource_VertexBuffer->GetGPUVirtualAddress();
+      geometryDesc.Triangles.VertexBuffer.StrideInBytes = sizeof(glm::vec3);
+      geometryDesc.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
+      geometryDesc.Triangles.VertexCount = 3;
+      geometryDesc.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+
+      // Requirement for scratch buffer and Assceleration buffer.
+      D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS bottomLevelAccelerationStructureInputs{};
+      bottomLevelAccelerationStructureInputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+      bottomLevelAccelerationStructureInputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
+      bottomLevelAccelerationStructureInputs.NumDescs = 1;
+      bottomLevelAccelerationStructureInputs.pGeometryDescs = &geometryDesc;
+      bottomLevelAccelerationStructureInputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+
+
+      D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO preBuildInfo{};
+      g_pID3D12Device5->GetRaytracingAccelerationStructurePrebuildInfo(&bottomLevelAccelerationStructureInputs,&preBuildInfo);
+
+      // allocate/Create buffers for acceleration structure. make seure to Create them With Unorederd Access Views.
+      //g_BottomLevelAccelerationStructure
+
+      // Scratch Buffer
+      D3D12_RESOURCE_DESC scratchBufferDescription{};
+      scratchBufferDescription.Alignment = 0;
+      scratchBufferDescription.DepthOrArraySize = 1;
+      scratchBufferDescription.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+      scratchBufferDescription.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+      scratchBufferDescription.Format = DXGI_FORMAT_UNKNOWN;
+      scratchBufferDescription.Height = 1;
+      scratchBufferDescription.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+      scratchBufferDescription.MipLevels = 1;
+      scratchBufferDescription.SampleDesc.Count = 1;
+      scratchBufferDescription.SampleDesc.Quality = 0;
+      scratchBufferDescription.Width = preBuildInfo.ScratchDataSizeInBytes;
+      
+      D3D12_HEAP_PROPERTIES defaultHeapProperties{};
+      defaultHeapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+      defaultHeapProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+      defaultHeapProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+      defaultHeapProperties.CreationNodeMask = 0;
+      defaultHeapProperties.VisibleNodeMask = 0;
+      
+      hr = g_pID3D12Device5->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &scratchBufferDescription, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, NULL, __uuidof(g_BottomLevelAccelerationStructure.pID3D12Resource_Scratch), (void**)&g_BottomLevelAccelerationStructure.pID3D12Resource_Scratch);
+      if (FAILED(hr))
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "CreateBottomLevelAccelerationStructure : ID3D12Device5->CreateCommittedResource(Scratch Buffer) FAILED.\n");
+            fclose(g_pFile);
+            return hr;
+      }
+      else
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "CreateBottomLevelAccelerationStructure : ID3D12Device5->CreateCommittedResource(Scratch Buffer) SUCCEEDED.\n");
+            fclose(g_pFile);
+      }
+      // Acceleration Structure
+      D3D12_RESOURCE_DESC accelerationStructureBufferDescription{};
+      accelerationStructureBufferDescription.Alignment = 0;
+      accelerationStructureBufferDescription.DepthOrArraySize = 1;
+      accelerationStructureBufferDescription.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+      accelerationStructureBufferDescription.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+      accelerationStructureBufferDescription.Format = DXGI_FORMAT_UNKNOWN;
+      accelerationStructureBufferDescription.Height = 1;
+      accelerationStructureBufferDescription.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+      accelerationStructureBufferDescription.MipLevels = 1;
+      accelerationStructureBufferDescription.SampleDesc.Count = 1;
+      accelerationStructureBufferDescription.SampleDesc.Quality = 0;
+      accelerationStructureBufferDescription.Width = preBuildInfo.ResultDataMaxSizeInBytes;
+
+
+      defaultHeapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+      defaultHeapProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+      defaultHeapProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+      defaultHeapProperties.CreationNodeMask = 0;
+      defaultHeapProperties.VisibleNodeMask = 0;
+
+      hr = g_pID3D12Device5->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &accelerationStructureBufferDescription, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, NULL, __uuidof(g_BottomLevelAccelerationStructure.pID3D12Resource_Result), (void**)&g_BottomLevelAccelerationStructure.pID3D12Resource_Result);
+      if (FAILED(hr))
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "CreateBottomLevelAccelerationStructure : ID3D12Device5->CreateCommittedResource(Acceleration Structure) FAILED.\n");
+            fclose(g_pFile);
+            return hr;
+      }
+      else
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "CreateBottomLevelAccelerationStructure : ID3D12Device5->CreateCommittedResource(Acceleration Structure) SUCCEEDED.\n");
+            fclose(g_pFile);
+      }
+
+      // Build the Bottom Level Acceleration Structure
+      D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC accelerationStructureDesc{};
+      accelerationStructureDesc.Inputs = bottomLevelAccelerationStructureInputs;
+      accelerationStructureDesc.DestAccelerationStructureData = g_BottomLevelAccelerationStructure.pID3D12Resource_Result->GetGPUVirtualAddress();
+      accelerationStructureDesc.ScratchAccelerationStructureData = g_BottomLevelAccelerationStructure.pID3D12Resource_Scratch->GetGPUVirtualAddress();
+
+      g_pID3D12GraphicsCommandList4->BuildRaytracingAccelerationStructure(&accelerationStructureDesc, 0, NULL);
+
+      // Add UAV barrier
+      D3D12_RESOURCE_BARRIER uavBarrier = {};
+      uavBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+      uavBarrier.UAV.pResource = g_BottomLevelAccelerationStructure.pID3D12Resource_Result;
+      g_pID3D12GraphicsCommandList4->ResourceBarrier(1, &uavBarrier);
+
+      return hr;
+}
+
+HRESULT CreateTopLevelAccelerationStructure(void)
+{
+      HRESULT hr = S_OK;
+
+      // Requirement for scratch buffer and Assceleration buffer.
+      D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS topLevelAccelerationStructureInputs{};
+      topLevelAccelerationStructureInputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+      topLevelAccelerationStructureInputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
+      topLevelAccelerationStructureInputs.NumDescs = 1;
+      topLevelAccelerationStructureInputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
+
+
+      D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO preBuildInfo{};
+      g_pID3D12Device5->GetRaytracingAccelerationStructurePrebuildInfo(&topLevelAccelerationStructureInputs, &preBuildInfo);
+
+      // allocate/Create buffers for acceleration structure. make seure to Create them With Unorederd Access Views.
+      //g_TopLevelAccelerationStructure
+
+      // Scratch Buffer
+      D3D12_RESOURCE_DESC scratchBufferDescription{};
+      scratchBufferDescription.Alignment = 0;
+      scratchBufferDescription.DepthOrArraySize = 1;
+      scratchBufferDescription.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+      scratchBufferDescription.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+      scratchBufferDescription.Format = DXGI_FORMAT_UNKNOWN;
+      scratchBufferDescription.Height = 1;
+      scratchBufferDescription.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+      scratchBufferDescription.MipLevels = 1;
+      scratchBufferDescription.SampleDesc.Count = 1;
+      scratchBufferDescription.SampleDesc.Quality = 0;
+      scratchBufferDescription.Width = preBuildInfo.ScratchDataSizeInBytes;
+
+      D3D12_HEAP_PROPERTIES defaultHeapProperties{};
+      defaultHeapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+      defaultHeapProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+      defaultHeapProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+      defaultHeapProperties.CreationNodeMask = 0;
+      defaultHeapProperties.VisibleNodeMask = 0;
+
+      hr = g_pID3D12Device5->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &scratchBufferDescription, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, NULL, __uuidof(g_TopLevelAccelerationStructure.pID3D12Resource_Scratch), (void**)&g_TopLevelAccelerationStructure.pID3D12Resource_Scratch);
+      if (FAILED(hr))
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "CreateTopLevelAccelerationStructure : ID3D12Device5->CreateCommittedResource(Scratch Buffer) FAILED.\n");
+            fclose(g_pFile);
+            return hr;
+      }
+      else
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "CreateTopLevelAccelerationStructure : ID3D12Device5->CreateCommittedResource(Scratch Buffer) SUCCEEDED.\n");
+            fclose(g_pFile);
+      }
+      // Acceleration Structure
+      D3D12_RESOURCE_DESC accelerationStructureBufferDescription{};
+      accelerationStructureBufferDescription.Alignment = 0;
+      accelerationStructureBufferDescription.DepthOrArraySize = 1;
+      accelerationStructureBufferDescription.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+      accelerationStructureBufferDescription.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+      accelerationStructureBufferDescription.Format = DXGI_FORMAT_UNKNOWN;
+      accelerationStructureBufferDescription.Height = 1;
+      accelerationStructureBufferDescription.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+      accelerationStructureBufferDescription.MipLevels = 1;
+      accelerationStructureBufferDescription.SampleDesc.Count = 1;
+      accelerationStructureBufferDescription.SampleDesc.Quality = 0;
+      accelerationStructureBufferDescription.Width = preBuildInfo.ResultDataMaxSizeInBytes;
+      g_iTLASSize = preBuildInfo.ResultDataMaxSizeInBytes;
+
+
+      defaultHeapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+      defaultHeapProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+      defaultHeapProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+      defaultHeapProperties.CreationNodeMask = 0;
+      defaultHeapProperties.VisibleNodeMask = 0;
+
+      hr = g_pID3D12Device5->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &accelerationStructureBufferDescription, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, NULL, __uuidof(g_TopLevelAccelerationStructure.pID3D12Resource_Result), (void**)&g_TopLevelAccelerationStructure.pID3D12Resource_Result);
+      if (FAILED(hr))
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "CreateTopLevelAccelerationStructure : ID3D12Device5->CreateCommittedResource(Acceleration Structure) FAILED.\n");
+            fclose(g_pFile);
+            return hr;
+      }
+      else
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "CreateTopLevelAccelerationStructure : ID3D12Device5->CreateCommittedResource(Acceleration Structure) SUCCEEDED.\n");
+            fclose(g_pFile);
+      }
+      
+
+      // Instance Buffer
+      D3D12_RESOURCE_DESC instanceBufferDescription{};
+      instanceBufferDescription.Alignment = 0;
+      instanceBufferDescription.DepthOrArraySize = 1;
+      instanceBufferDescription.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+      instanceBufferDescription.Flags = D3D12_RESOURCE_FLAG_NONE;
+      instanceBufferDescription.Format = DXGI_FORMAT_UNKNOWN;
+      instanceBufferDescription.Height = 1;
+      instanceBufferDescription.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+      instanceBufferDescription.MipLevels = 1;
+      instanceBufferDescription.SampleDesc.Count = 1;
+      instanceBufferDescription.SampleDesc.Quality = 0;
+      instanceBufferDescription.Width = sizeof(D3D12_RAYTRACING_INSTANCE_DESC);
+
+
+      defaultHeapProperties.Type = D3D12_HEAP_TYPE_UPLOAD;
+      defaultHeapProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+      defaultHeapProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+      defaultHeapProperties.CreationNodeMask = 0;
+      defaultHeapProperties.VisibleNodeMask = 0;
+
+      hr = g_pID3D12Device5->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &instanceBufferDescription, D3D12_RESOURCE_STATE_GENERIC_READ, NULL, __uuidof(g_TopLevelAccelerationStructure.pID3D12Resource_InstanceDesc), (void**)&g_TopLevelAccelerationStructure.pID3D12Resource_InstanceDesc);
+      if (FAILED(hr))
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "CreateTopLevelAccelerationStructure : ID3D12Device5->CreateCommittedResource(Instance Buffer) FAILED.\n");
+            fclose(g_pFile);
+            return hr;
+      }
+      else
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "CreateTopLevelAccelerationStructure : ID3D12Device5->CreateCommittedResource(Instance Buffer) SUCCEEDED.\n");
+            fclose(g_pFile);
+      }
+
+      D3D12_RAYTRACING_INSTANCE_DESC* pInstanceDesc=NULL;
+      g_TopLevelAccelerationStructure.pID3D12Resource_InstanceDesc->Map(0, NULL, (void**)&pInstanceDesc);
+      if (FAILED(hr))
+      {
+            fopen_s(&g_pFile, g_szLogFileName, "a+");
+            fprintf_s(g_pFile, "CreateTopLevelAccelerationStructure : ID3D12Resource->Map(Instance Buffer) FAILED.\n");
+            fclose(g_pFile);
+            return hr;
+      }
+
+      if (pInstanceDesc)
+      {
+            pInstanceDesc->InstanceID = 0; //This value will be accessible to the shader via InstanceID()
+            pInstanceDesc->InstanceContributionToHitGroupIndex = 0; // Offset of Shader Binding table!
+            pInstanceDesc->Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
+            glm::mat4 identityMatrix;
+            memcpy(pInstanceDesc->Transform, &identityMatrix, sizeof(pInstanceDesc->Transform));
+            pInstanceDesc->AccelerationStructure = g_BottomLevelAccelerationStructure.pID3D12Resource_Result->GetGPUVirtualAddress();
+            pInstanceDesc->InstanceMask = 0xFF;
+      }
+      g_TopLevelAccelerationStructure.pID3D12Resource_InstanceDesc->Unmap(0, NULL);
+
+      // Build the Top Level Acceleration Structure
+      D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC accelerationStructureDesc{};
+      accelerationStructureDesc.Inputs = topLevelAccelerationStructureInputs;
+      accelerationStructureDesc.Inputs.InstanceDescs = g_TopLevelAccelerationStructure.pID3D12Resource_InstanceDesc->GetGPUVirtualAddress();
+      accelerationStructureDesc.DestAccelerationStructureData = g_TopLevelAccelerationStructure.pID3D12Resource_Result->GetGPUVirtualAddress();
+      accelerationStructureDesc.ScratchAccelerationStructureData = g_TopLevelAccelerationStructure.pID3D12Resource_Scratch->GetGPUVirtualAddress();
+
+      g_pID3D12GraphicsCommandList4->BuildRaytracingAccelerationStructure(&accelerationStructureDesc, 0, NULL);
+
+      // Add UAV barrier
+      D3D12_RESOURCE_BARRIER uavBarrier = {};
+      uavBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+      uavBarrier.UAV.pResource = g_TopLevelAccelerationStructure.pID3D12Resource_Result;
+      g_pID3D12GraphicsCommandList4->ResourceBarrier(1, &uavBarrier);
 
       return hr;
 }
