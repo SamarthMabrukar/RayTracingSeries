@@ -1,3 +1,0 @@
-# Shader Checker Service Dependencies
-pywin32>=306
-pyinstaller>=6.0

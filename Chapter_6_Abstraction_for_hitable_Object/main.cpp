@@ -33,8 +33,8 @@ int main()
 
     // World
     hittable_list world;
-    world.add(make_shared<sphere>(point3(0, 0, -1), 0.5));
-    world.add(make_shared<sphere>(point3(0, -100.5, -1), 100));
+    world.add(make_shared<sphere>(point3(0, 0, -1), 0.5)); // Sphere with normals
+    world.add(make_shared<sphere>(point3(0, -100.5, -1), 100));// ground (which is also a sphere)
 
     // Camera
     // viewport widthd less than one are okay since they are real valued.

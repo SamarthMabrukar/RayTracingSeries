@@ -40,9 +40,8 @@ public:
         }
 
         rec.t = root;
-        rec.point = vRay.at(rec.t);
-        rec.normal = (rec.point - center) / radius;
-        vec3 outward_normal = (rec.point - center) / radius;
+        rec.p = vRay.at(rec.t);
+        vec3 outward_normal = (rec.p - center) / radius;
         rec.set_face_normal(vRay, outward_normal);
 
         return true;

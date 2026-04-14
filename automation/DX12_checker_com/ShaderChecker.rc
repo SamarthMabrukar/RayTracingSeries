@@ -1,5 +1,0 @@
-// ShaderChecker.rc - Resource file for embedding type library
-
-// Embed the type library as a resource (standard COM practice)
-// Resource ID 1 is the default for type libraries
-1 TYPELIB "ShaderChecker.tlb"

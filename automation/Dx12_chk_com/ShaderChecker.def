@@ -1,8 +1,0 @@
-; ShaderChecker.def - Module definition file
-LIBRARY "ShaderChecker.dll"
-EXPORTS
-    DllGetClassObject   PRIVATE
-    DllCanUnloadNow     PRIVATE
-    DllRegisterServer   PRIVATE
-    DllUnregisterServer PRIVATE
-	

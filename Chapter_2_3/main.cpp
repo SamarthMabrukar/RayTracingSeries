@@ -10,12 +10,12 @@ int main()
     std::cout << "P3\n"
               << iImageWidth << " " << iImageHeight << "\n255\n";
 
-    for (int j = iImageHeight - 1; j >= 0; j--)
+    for (int j = 0; j <  iImageHeight; j++)
     {
-        std::clog << "\rScanlines remaining: " << (iImageHeight - j) << ' ' << std::flush;
+        std::clog << "\rScanlines remaining: " << (iImageWidth) << ' ' << std::flush;
         for (int i = 0; i < iImageWidth; i++)
         {
-            auto pixel_color = color(double(i) / double(iImageWidth), double(j) / double(iImageHeight), 0.2);
+            auto pixel_color = color(double(i) / double(iImageWidth), double(j) / double(iImageHeight), 0.0);
             write_color(std::cout, pixel_color);
         }
     }

@@ -22,6 +22,7 @@ color ray_color(const ray &r)
         return color(1.0, 0.0, 0.0);
     }
 
+    // Ray Miss Color
     // Background color
     vec3 unit_direction = unit_vector(r.direction());
     auto a = 0.5 * (unit_direction.y() + 1.0); // conversion if [-1,1] to [0,1]

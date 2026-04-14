@@ -41,7 +41,8 @@ int main()
         << "P3\n"
         << iImageWidth << " " << iImageHeight << "\n255\n";
 
-    for (int j = iImageHeight - 1; j >= 0; j--)
+    //for (int j = iImageHeight - 1; j >= 0; j--)
+    for (int j = 0; j < iImageHeight; j++)
     {
         std::clog << "\rScanlines remaining: " << (iImageHeight - j) << ' ' << std::flush;
         for (int i = 0; i < iImageWidth; i++)
